@@ -1,0 +1,32 @@
+FROM python:3.11-slim
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        curl \
+        git \
+        build-essential \
+        && rm -rf /var/lib/apt/lists/*
+
+ENV UV_VERSION=0.4.18
+RUN pip install uv==$UV_VERSION
+
+WORKDIR /app
+
+COPY pyproject.toml uv.lock* ./
+
+RUN uv venv /opt/venv && \
+    . /opt/venv/bin/activate && \
+    uv pip install --no-cache -e ".[dev,test]"
+
+ENV PATH="/opt/venv/bin:$PATH"
+
+ENV PYTHONPATH=/app
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV RELOAD=true
+
+EXPOSE 8000
+
+RUN mkdir -p /app/logs
+
+CMD ["uvicorn", "schedule_manager.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

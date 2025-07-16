@@ -1,0 +1,112 @@
+services:
+  schedule-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: schedule-manager-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+      - LOG_LEVEL=info
+      - ENDPOINT_URL=https://ofc-test-01.tspb.su/test-task/
+    volumes:
+      # Монтирование кода для разработки (раскомментировать при необходимости)
+      # - .:/app
+      # Монтирование логов
+      - ./logs:/app/logs
+    networks:
+      - schedule-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Nginx для проксирования (опционально)
+  nginx:
+    image: nginx:alpine
+    container_name: schedule-manager-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      schedule-manager:
+        condition: service_healthy
+    networks:
+      - schedule-network
+    profiles:
+      - production
+
+  # Redis для кэширования (опционально)
+  redis:
+    image: redis:7-alpine
+    container_name: schedule-manager-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - schedule-network
+    profiles:
+      - with-cache
+
+  # PostgreSQL для хранения данных (опционально)
+  postgres:
+    image: postgres:15-alpine
+    container_name: schedule-manager-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: schedule_manager
+      POSTGRES_USER: schedule_user
+      POSTGRES_PASSWORD: schedule_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - schedule-network
+    profiles:
+      - with-db
+
+  # Контейнер для разработки с hot-reload
+  schedule-manager-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: schedule-manager-dev
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+      - LOG_LEVEL=debug
+      - RELOAD=true
+    volumes:
+      - .:/app
+      - uv_cache:/root/.cache/uv
+    networks:
+      - schedule-network
+    profiles:
+      - development
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  uv_cache:
+    driver: local
+
+networks:
+  schedule-network:
+    driver: bridge
